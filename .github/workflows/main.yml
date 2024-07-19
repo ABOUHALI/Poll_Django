@@ -1,0 +1,77 @@
+name: CI/CD Pipeline
+
+on:
+  push:
+    branches: [ main ]
+  pull_request:
+    branches: [ main ]
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: postgres:latest
+        env:
+          POSTGRES_DB: ${{ secrets.POSTGRES_DB }}
+          POSTGRES_USER: ${{ secrets.POSTGRES_USER }}
+          POSTGRES_PASSWORD: ${{ secrets.POSTGRES_PASSWORD }}
+        options: >-
+          --health-cmd pg_isready
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+    steps:
+      - uses: actions/checkout@v2
+      
+      - name: Set up Python
+        uses: actions/setup-python@v2
+        with:
+          python-version: '3.x'
+      
+      - name: Install dependencies
+        run: |
+          sudo apt-get update && sudo apt-get install -y python3-dev libpq-dev gcc musl-dev
+          python -m venv venv
+          source venv/bin/activate
+          pip install -r requirements.txt
+
+      - name: Migrate
+        run: |
+          cd poll_project
+          python manage.py migrate
+      
+      - name: Build
+        run: echo "Building the application..."
+
+  test:
+    needs: build
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v2
+      
+      - name: Set up Python
+        uses: actions/setup-python@v2
+        with:
+          python-version: '3.x'
+      
+      - name: Test
+        run: |
+          source venv/bin/activate
+          cd poll_project
+          python manage.py test
+
+  security:
+    needs: test
+    runs-on: ubuntu-latest
+    container:
+      image: zaproxy/zap-weekly
+      
+    steps:
+      - uses: actions/checkout@v2
+
+      - name: ZAP Scan
+        run: |
+          mkdir -p owasp_zap_reports
+          zap-baseline.py -t http://web:8000 -r owasp_zap_reports/baseline_report.html
+          # Make sure to configure zap-baseline.py correctly to point to a running instance of your web application
